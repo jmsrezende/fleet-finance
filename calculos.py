@@ -1,5 +1,8 @@
 """Calculos de valor presente para comparar custos de compra e aluguel."""
 
+import math
+
+
 def gerar_fluxo_compra(
     quantidade_veiculos,
     preco_por_veiculo,
@@ -283,3 +286,70 @@ def analisar_pontos_inflexao(
         }
     )
     return resultados
+
+
+def gerar_dados_sensibilidade_aluguel(
+    quantidade_veiculos,
+    preco_por_veiculo,
+    manutencao_anual_por_veiculo,
+    seguro_anual_por_veiculo,
+    revenda_por_veiculo,
+    aluguel_mensal_por_veiculo,
+    anos,
+    taxa_anual,
+    valores_aluguel,
+):
+    """Calcula os custos presentes para cada aluguel mensal fornecido."""
+    valores = list(valores_aluguel)
+    if not valores:
+        raise ValueError("Informe pelo menos um valor de aluguel para analisar.")
+    if any(
+        not isinstance(valor, (int, float))
+        or not math.isfinite(valor)
+        or valor < 0
+        for valor in valores
+    ):
+        raise ValueError("Os valores de aluguel devem ser números finitos não negativos.")
+
+    custos_compra = []
+    custos_aluguel = []
+    for valor_aluguel in valores:
+        fluxo_compra = gerar_fluxo_compra(
+            quantidade_veiculos,
+            preco_por_veiculo,
+            manutencao_anual_por_veiculo,
+            seguro_anual_por_veiculo,
+            revenda_por_veiculo,
+            anos,
+        )
+        fluxo_aluguel = gerar_fluxo_aluguel(
+            quantidade_veiculos, valor_aluguel, anos
+        )
+        custos_compra.append(calcular_valor_presente(fluxo_compra, taxa_anual))
+        custos_aluguel.append(calcular_valor_presente(fluxo_aluguel, taxa_anual))
+
+    def diferenca_com_aluguel(valor):
+        return _diferenca_de_custos(
+            quantidade_veiculos,
+            preco_por_veiculo,
+            manutencao_anual_por_veiculo,
+            seguro_anual_por_veiculo,
+            revenda_por_veiculo,
+            valor,
+            anos,
+            taxa_anual,
+        )
+
+    limite_superior = max(1_000_000.0, aluguel_mensal_por_veiculo * 10)
+    ponto = _buscar_inflexao_continua(
+        "aluguel",
+        aluguel_mensal_por_veiculo,
+        diferenca_com_aluguel,
+        limite_superior,
+    )
+    return {
+        "valores_aluguel": valores,
+        "custos_compra": custos_compra,
+        "custos_aluguel": custos_aluguel,
+        "ponto_inflexao": ponto["ponto"] if ponto is not None else None,
+    }

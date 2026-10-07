@@ -7,6 +7,7 @@ from calculos import (
     comparar_alternativas,
     gerar_fluxo_aluguel,
     gerar_fluxo_compra,
+    gerar_dados_sensibilidade_aluguel,
 )
 
 
@@ -179,6 +180,47 @@ class TestCalculosFinanceiros(unittest.TestCase):
             comparar_alternativas(self.diferenca_de_custos(anos=depois), 0)[0],
         )
         self.assertNotEqual(transicao["antes"], transicao["depois"])
+
+    def test_sensibilidade_de_aluguel_recalcula_custos_e_preserva_demais_dados(self):
+        dados = gerar_dados_sensibilidade_aluguel(
+            10, 80000, 5000, 3000, 30000, 2000, 5, 0.10, [1000, 2000, 3000]
+        )
+
+        self.assertEqual(dados["valores_aluguel"], [1000, 2000, 3000])
+        custo_compra_esperado = calcular_valor_presente(
+            gerar_fluxo_compra(10, 80000, 5000, 3000, 30000, 5), 0.10
+        )
+        self.assertEqual(dados["custos_compra"], [custo_compra_esperado] * 3)
+        for indice, aluguel in enumerate((1000, 2000, 3000)):
+            custo_aluguel_esperado = calcular_valor_presente(
+                gerar_fluxo_aluguel(10, aluguel, 5), 0.10
+            )
+            self.assertAlmostEqual(
+                dados["custos_aluguel"][indice], custo_aluguel_esperado
+            )
+        self.assertAlmostEqual(dados["ponto_inflexao"], 2015.8228366447543)
+
+    def test_sensibilidade_rejeita_valores_de_aluguel_invalidos(self):
+        for valores in ([], [-1], [float("nan")], [float("inf")]):
+            with self.subTest(valores=valores):
+                with self.assertRaises(ValueError):
+                    gerar_dados_sensibilidade_aluguel(
+                        10, 80000, 5000, 3000, 30000, 2000, 5, 0.10, valores
+                    )
+
+    def test_sensibilidade_sem_ponto_de_inflexao_retorna_none(self):
+        dados = gerar_dados_sensibilidade_aluguel(
+            1, 1_000_000_000_000, 0, 0, 0, 0, 5, 0.10, [0, 1]
+        )
+
+        self.assertIsNone(dados["ponto_inflexao"])
+        self.assertEqual(
+            dados["custos_aluguel"],
+            [
+                calcular_valor_presente(gerar_fluxo_aluguel(1, aluguel, 5), 0.10)
+                for aluguel in (0, 1)
+            ],
+        )
 
 
 if __name__ == "__main__":
