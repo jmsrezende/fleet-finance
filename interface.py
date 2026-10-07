@@ -82,16 +82,57 @@ def criar_interface(root):
             campo.grid(row=linha, column=1, pady=3, sticky="e")
             campos[chave] = campo
 
+    secao_inflacao = ttk.LabelFrame(
+        coluna_esquerda, text="Inflação", padding=10
+    )
+    secao_inflacao.grid(
+        row=len(secoes), column=0, pady=(4, 4), sticky="ew"
+    )
+    considerar_inflacao = tk.BooleanVar(value=False)
+    ttk.Checkbutton(
+        secao_inflacao,
+        text="Considerar inflação",
+        variable=considerar_inflacao,
+        command=lambda: campo_inflacao.configure(
+            state="normal" if considerar_inflacao.get() else "disabled"
+        ),
+    ).grid(row=0, column=0, columnspan=2, sticky="w")
+    ttk.Label(secao_inflacao, text="Taxa de inflação anual (%):").grid(
+        row=1, column=0, padx=(0, 10), pady=(4, 0), sticky="w"
+    )
+    campo_inflacao = ttk.Entry(secao_inflacao, width=18)
+    campo_inflacao.insert(0, "6,00")
+    campo_inflacao.configure(state="disabled")
+    campo_inflacao.grid(row=1, column=1, pady=(4, 0), sticky="e")
+
     resultado = ttk.Label(
         coluna_esquerda,
         text="Informe os dados e clique em Calcular.",
         justify="left",
         padding=(4, 6),
     )
-    resultado.grid(row=len(secoes) + 1, column=0, pady=2, sticky="w")
+    resultado.grid(row=len(secoes) + 2, column=0, pady=2, sticky="w")
 
-    def ler_dados():
+    def ler_dados(inflacao_obrigatoria=False):
         try:
+            taxa_inflacao = 0
+            if considerar_inflacao.get() or inflacao_obrigatoria:
+                texto_inflacao = campo_inflacao.get().strip()
+                if not texto_inflacao:
+                    raise ValueError(
+                        "Preencha o campo 'Taxa de inflação anual'."
+                    )
+                try:
+                    taxa_inflacao = float(texto_inflacao.replace(",", ".")) / 100
+                except ValueError:
+                    raise ValueError(
+                        "Informe um número válido no campo "
+                        "'Taxa de inflação anual'."
+                    ) from None
+                if not math.isfinite(taxa_inflacao) or taxa_inflacao < 0:
+                    raise ValueError(
+                        "A taxa de inflação anual deve ser finita e não negativa."
+                    )
             return {
                 "quantidade": obter_numero(
                     "quantidade", "Quantidade de veículos", True
@@ -107,6 +148,7 @@ def criar_interface(root):
                 ),
                 "anos": obter_numero("anos", "Período de análise", True),
                 "taxa": obter_numero("taxa", "Taxa de desconto anual") / 100,
+                "inflacao": taxa_inflacao,
             }
         except ValueError as erro:
             messagebox.showerror("Dados inválidos", str(erro), parent=root)
@@ -145,9 +187,13 @@ def criar_interface(root):
             dados["seguro"],
             dados["revenda"],
             dados["anos"],
+            dados["inflacao"],
         )
         fluxo_aluguel = gerar_fluxo_aluguel(
-            dados["quantidade"], dados["aluguel"], dados["anos"]
+            dados["quantidade"],
+            dados["aluguel"],
+            dados["anos"],
+            dados["inflacao"],
         )
         custo_compra = calcular_valor_presente(fluxo_compra, dados["taxa"])
         custo_aluguel = calcular_valor_presente(fluxo_aluguel, dados["taxa"])
@@ -170,14 +216,14 @@ def criar_interface(root):
         )
 
     ttk.Button(coluna_esquerda, text="Calcular", command=calcular).grid(
-        row=len(secoes), column=0, pady=(2, 6), sticky="ew"
+        row=len(secoes) + 1, column=0, pady=(2, 6), sticky="ew"
     )
 
     secao_inflexao = ttk.LabelFrame(
         coluna_esquerda, text="Análise de pontos de inflexão", padding=10
     )
     secao_inflexao.grid(
-        row=len(secoes) + 2, column=0, pady=(2, 4), sticky="ew"
+        row=len(secoes) + 3, column=0, pady=(2, 4), sticky="ew"
     )
     texto_inflexao = tk.Text(
         secao_inflexao, width=60, height=7, wrap="word", state="disabled"
@@ -203,6 +249,7 @@ def criar_interface(root):
             dados["aluguel"],
             dados["anos"],
             dados["taxa"],
+            dados["inflacao"],
         )
         rotulos = {
             "preco": ("Preço de compra por veículo", "R$"),
@@ -319,6 +366,12 @@ def criar_interface(root):
             "eixo_x": "Período de análise (anos)",
             "unidade": "anos",
         },
+        "Taxa de inflação anual": {
+            "chave": "inflacao",
+            "titulo": "Sensibilidade do custo presente à inflação",
+            "eixo_x": "Taxa de inflação anual (%)",
+            "unidade": "%",
+        },
     }
     ttk.Label(secao_sensibilidade, text="Parâmetro:").grid(
         row=0, column=0, padx=(0, 8), sticky="w"
@@ -334,13 +387,15 @@ def criar_interface(root):
     secao_sensibilidade.columnconfigure(1, weight=1)
 
     def gerar_grafico_sensibilidade():
-        dados = ler_dados()
+        definicao = definicoes_sensibilidade[seletor_parametro.get()]
+        chave = definicao["chave"]
+        dados = ler_dados(inflacao_obrigatoria=chave == "inflacao")
         if dados is None:
             return
 
-        definicao = definicoes_sensibilidade[seletor_parametro.get()]
-        chave = definicao["chave"]
         valor_atual = dados[chave]
+        if chave == "inflacao" and not considerar_inflacao.get():
+            valor_atual = float(campo_inflacao.get().strip().replace(",", ".")) / 100
         if chave == "anos":
             limite_inferior = max(1, math.floor(valor_atual * 0.5))
             limite_superior = max(
@@ -349,7 +404,7 @@ def criar_interface(root):
             valores = list(range(limite_inferior, limite_superior + 1))
         else:
             limite_inferior = max(0, valor_atual * 0.5)
-            if chave == "taxa":
+            if chave in ("taxa", "inflacao"):
                 limite_superior = valor_atual * 1.5 if valor_atual else 0.1
             else:
                 limite_superior = valor_atual * 1.5 if valor_atual else 1

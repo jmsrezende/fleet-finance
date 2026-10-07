@@ -304,6 +304,197 @@ class TestCalculosFinanceiros(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     gerar_dados_sensibilidade(parametro, parametros, valores)
 
+    def test_cenario_base_sem_inflacao_preserva_custos_atuais(self):
+        fluxo_compra = gerar_fluxo_compra(10, 80000, 5000, 3000, 30000, 5)
+        fluxo_aluguel = gerar_fluxo_aluguel(10, 2000, 5)
+        custo_compra = calcular_valor_presente(fluxo_compra, 0.10)
+        custo_aluguel = calcular_valor_presente(fluxo_aluguel, 0.10)
+
+        self.assertEqual(round(custo_compra, 2), 916986.54)
+        self.assertEqual(round(custo_aluguel, 2), 909788.82)
+
+    def test_inflacao_zero_preserva_fluxos_e_custos_sem_inflacao(self):
+        compra_sem_inflacao = gerar_fluxo_compra(
+            10, 80000, 5000, 3000, 30000, 5
+        )
+        aluguel_sem_inflacao = gerar_fluxo_aluguel(10, 2000, 5)
+
+        self.assertEqual(
+            gerar_fluxo_compra(10, 80000, 5000, 3000, 30000, 5, 0),
+            compra_sem_inflacao,
+        )
+        self.assertEqual(
+            gerar_fluxo_aluguel(10, 2000, 5, 0),
+            aluguel_sem_inflacao,
+        )
+        self.assertEqual(
+            calcular_valor_presente(compra_sem_inflacao, 0.10),
+            calcular_valor_presente(
+                gerar_fluxo_compra(10, 80000, 5000, 3000, 30000, 5, 0),
+                0.10,
+            ),
+        )
+
+    def test_inflacao_reajusta_aluguel_manutencao_e_seguro_ano_a_ano(self):
+        fluxo_aluguel = gerar_fluxo_aluguel(1, 2000, 3, 0.06)
+        self.assertEqual(fluxo_aluguel[:3], [0, 24000, 25440])
+        self.assertAlmostEqual(fluxo_aluguel[3], 26966.4)
+        fluxo_manutencao = gerar_fluxo_compra(1, 0, 5000, 0, 0, 3, 0.06)
+        fluxo_seguro = gerar_fluxo_compra(1, 0, 0, 3000, 0, 3, 0.06)
+        self.assertEqual(fluxo_manutencao[:3], [0, 5000, 5300])
+        self.assertAlmostEqual(fluxo_manutencao[3], 5618)
+        self.assertEqual(fluxo_seguro[:3], [0, 3000, 3180])
+        self.assertAlmostEqual(fluxo_seguro[3], 3370.8)
+
+    def test_inflacao_nao_altera_preco_inicial_nem_valor_de_revenda(self):
+        fluxo = gerar_fluxo_compra(2, 80000, 5000, 3000, 30000, 3, 0.06)
+        fluxo_sem_revenda = gerar_fluxo_compra(2, 80000, 5000, 3000, 0, 3, 0.06)
+
+        self.assertEqual(fluxo[0], 160000)
+        self.assertEqual(
+            fluxo_sem_revenda[-1] - fluxo[-1],
+            2 * 30000,
+        )
+
+    def test_custos_futuros_aumentam_com_inflacao_positiva(self):
+        custo_compra_sem = calcular_valor_presente(
+            gerar_fluxo_compra(10, 80000, 5000, 3000, 30000, 5), 0.10
+        )
+        custo_compra_com = calcular_valor_presente(
+            gerar_fluxo_compra(10, 80000, 5000, 3000, 30000, 5, 0.06),
+            0.10,
+        )
+        custo_aluguel_sem = calcular_valor_presente(
+            gerar_fluxo_aluguel(10, 2000, 5), 0.10
+        )
+        custo_aluguel_com = calcular_valor_presente(
+            gerar_fluxo_aluguel(10, 2000, 5, 0.06), 0.10
+        )
+
+        self.assertGreater(custo_compra_com, custo_compra_sem)
+        self.assertGreater(custo_aluguel_com, custo_aluguel_sem)
+
+    def test_pontos_de_inflexao_usam_a_taxa_de_inflacao_informada(self):
+        resultados = analisar_pontos_inflexao(
+            10, 80000, 5000, 3000, 30000, 2000, 5, 0.10, 0.06
+        )
+        ponto_aluguel = next(
+            item["ponto"]["ponto"]
+            for item in resultados
+            if item["parametro"] == "aluguel"
+        )
+        custo_compra = calcular_valor_presente(
+            gerar_fluxo_compra(10, 80000, 5000, 3000, 30000, 5, 0.06),
+            0.10,
+        )
+        custo_aluguel = calcular_valor_presente(
+            gerar_fluxo_aluguel(10, ponto_aluguel, 5, 0.06),
+            0.10,
+        )
+        self.assertAlmostEqual(custo_compra, custo_aluguel, places=5)
+
+    def test_sensibilidade_preserva_inflacao_ativa_nos_demais_parametros(self):
+        parametros = {
+            "quantidade": 10,
+            "preco": 80000,
+            "manutencao": 5000,
+            "seguro": 3000,
+            "revenda": 30000,
+            "aluguel": 2000,
+            "anos": 5,
+            "taxa": 0.10,
+            "inflacao": 0.06,
+        }
+        dados = gerar_dados_sensibilidade("aluguel", parametros, [1000, 2000])
+        esperado = calcular_valor_presente(
+            gerar_fluxo_compra(10, 80000, 5000, 3000, 30000, 5, 0.06),
+            0.10,
+        )
+        self.assertEqual(dados["custos_compra"], [esperado, esperado])
+        self.assertEqual(
+            dados["custos_aluguel"],
+            [
+                calcular_valor_presente(
+                    gerar_fluxo_aluguel(10, aluguel, 5, 0.06), 0.10
+                )
+                for aluguel in [1000, 2000]
+            ],
+        )
+
+    def test_sensibilidade_da_inflacao_recalcula_compra_e_aluguel(self):
+        parametros = {
+            "quantidade": 10,
+            "preco": 80000,
+            "manutencao": 5000,
+            "seguro": 3000,
+            "revenda": 30000,
+            "aluguel": 2000,
+            "anos": 5,
+            "taxa": 0.10,
+            "inflacao": 0.06,
+        }
+        taxas = [0, 0.06, 0.09]
+        dados = gerar_dados_sensibilidade("inflacao", parametros, taxas)
+
+        self.assertIsNotNone(dados["ponto_inflexao"])
+        for indice, inflacao in enumerate(taxas):
+            self.assertAlmostEqual(
+                dados["custos_compra"][indice],
+                calcular_valor_presente(
+                    gerar_fluxo_compra(
+                        10, 80000, 5000, 3000, 30000, 5, inflacao
+                    ),
+                    0.10,
+                ),
+            )
+            self.assertAlmostEqual(
+                dados["custos_aluguel"][indice],
+                calcular_valor_presente(
+                    gerar_fluxo_aluguel(10, 2000, 5, inflacao), 0.10
+                ),
+            )
+        self.assertAlmostEqual(
+            dados["custos_compra"][0],
+            calcular_valor_presente(
+                gerar_fluxo_compra(10, 80000, 5000, 3000, 30000, 5),
+                0.10,
+            ),
+        )
+        self.assertAlmostEqual(
+            dados["custos_aluguel"][0],
+            calcular_valor_presente(gerar_fluxo_aluguel(10, 2000, 5), 0.10),
+        )
+        custo_compra_no_ponto = calcular_valor_presente(
+            gerar_fluxo_compra(
+                10, 80000, 5000, 3000, 30000, 5, dados["ponto_inflexao"]
+            ),
+            0.10,
+        )
+        custo_aluguel_no_ponto = calcular_valor_presente(
+            gerar_fluxo_aluguel(10, 2000, 5, dados["ponto_inflexao"]),
+            0.10,
+        )
+        self.assertAlmostEqual(custo_compra_no_ponto, custo_aluguel_no_ponto, places=5)
+
+    def test_sensibilidade_rejeita_taxas_de_inflacao_negativas(self):
+        parametros = {
+            "quantidade": 1,
+            "preco": 100,
+            "manutencao": 1,
+            "seguro": 1,
+            "revenda": 0,
+            "aluguel": 1,
+            "anos": 1,
+            "taxa": 0.1,
+            "inflacao": 0,
+        }
+        with self.assertRaises(ValueError):
+            gerar_dados_sensibilidade("inflacao", parametros, [-0.01])
+        with self.assertRaises(ValueError):
+            gerar_fluxo_compra(1, 100, 1, 1, 0, 1, -0.01)
+        with self.assertRaises(ValueError):
+            gerar_fluxo_aluguel(1, 1, 1, -0.01)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -3,6 +3,15 @@
 import math
 
 
+def _validar_inflacao(inflacao_anual):
+    if (
+        not isinstance(inflacao_anual, (int, float))
+        or not math.isfinite(inflacao_anual)
+        or inflacao_anual < 0
+    ):
+        raise ValueError("A taxa de inflação anual deve ser finita e não negativa.")
+
+
 def gerar_fluxo_compra(
     quantidade_veiculos,
     preco_por_veiculo,
@@ -10,14 +19,16 @@ def gerar_fluxo_compra(
     seguro_anual_por_veiculo,
     revenda_por_veiculo,
     anos,
+    inflacao_anual=0,
 ):
     """Retorna os custos de compra nos periodos 0 a anos."""
+    _validar_inflacao(inflacao_anual)
     fluxo = [quantidade_veiculos * preco_por_veiculo]
 
     for ano in range(1, anos + 1):
         custo_anual = quantidade_veiculos * (
             manutencao_anual_por_veiculo + seguro_anual_por_veiculo
-        )
+        ) * (1 + inflacao_anual) ** (ano - 1)
         if ano == anos:
             # A revenda reduz o desembolso liquido no ultimo periodo.
             custo_anual -= quantidade_veiculos * revenda_por_veiculo
@@ -26,10 +37,19 @@ def gerar_fluxo_compra(
     return fluxo
 
 
-def gerar_fluxo_aluguel(quantidade_veiculos, aluguel_mensal_por_veiculo, anos):
+def gerar_fluxo_aluguel(
+    quantidade_veiculos,
+    aluguel_mensal_por_veiculo,
+    anos,
+    inflacao_anual=0,
+):
     """Anualiza o aluguel mensal e registra cada pagamento no fim do ano."""
+    _validar_inflacao(inflacao_anual)
     pagamento_anual = quantidade_veiculos * aluguel_mensal_por_veiculo * 12
-    return [0] + [pagamento_anual] * anos
+    return [0] + [
+        pagamento_anual * (1 + inflacao_anual) ** (ano - 1)
+        for ano in range(1, anos + 1)
+    ]
 
 
 def calcular_valor_presente(fluxo, taxa_anual):
@@ -55,6 +75,7 @@ def _diferenca_de_custos(
     aluguel_mensal_por_veiculo,
     anos,
     taxa_anual,
+    inflacao_anual=0,
 ):
     fluxo_compra = gerar_fluxo_compra(
         quantidade_veiculos,
@@ -63,9 +84,13 @@ def _diferenca_de_custos(
         seguro_anual_por_veiculo,
         revenda_por_veiculo,
         anos,
+        inflacao_anual,
     )
     fluxo_aluguel = gerar_fluxo_aluguel(
-        quantidade_veiculos, aluguel_mensal_por_veiculo, anos
+        quantidade_veiculos,
+        aluguel_mensal_por_veiculo,
+        anos,
+        inflacao_anual,
     )
     custo_compra = calcular_valor_presente(fluxo_compra, taxa_anual)
     custo_aluguel = calcular_valor_presente(fluxo_aluguel, taxa_anual)
@@ -99,7 +124,7 @@ def _buscar_inflexao_continua(
     limite_superior,
     amostras=10000,
 ):
-    if parametro == "taxa":
+    if parametro in ("taxa", "inflacao"):
         valores = [
             limite_superior * indice / amostras
             for indice in range(amostras + 1)
@@ -155,6 +180,7 @@ def _buscar_inflexao_anos(
     taxa_anual,
     anos_atuais,
     limite_anos=100,
+    inflacao_anual=0,
 ):
     decisoes = {}
     for anos in range(1, limite_anos + 1):
@@ -167,6 +193,7 @@ def _buscar_inflexao_anos(
             aluguel_mensal_por_veiculo,
             anos,
             taxa_anual,
+            inflacao_anual,
         )
         escala = max(1, abs(diferenca))
         decisoes[anos] = (
@@ -216,6 +243,7 @@ def analisar_pontos_inflexao(
     aluguel_mensal_por_veiculo,
     anos,
     taxa_anual,
+    inflacao_anual=0,
 ):
     """Busca mudanças de decisão para cada parâmetro, mantendo os demais fixos."""
     parametros = (
@@ -248,6 +276,7 @@ def analisar_pontos_inflexao(
                 valores["aluguel"],
                 anos,
                 valores["taxa"],
+                inflacao_anual,
             )
 
         limite_superior = (
@@ -276,6 +305,7 @@ def analisar_pontos_inflexao(
         aluguel_mensal_por_veiculo,
         taxa_anual,
         anos,
+        inflacao_anual=inflacao_anual,
     )
     resultados.append(
         {
@@ -298,6 +328,7 @@ def gerar_dados_sensibilidade(parametro, parametros, valores):
         "revenda",
         "taxa",
         "anos",
+        "inflacao",
     }
     if parametro not in parametros_analisaveis:
         raise ValueError(f"Parâmetro de sensibilidade desconhecido: {parametro}.")
@@ -328,6 +359,7 @@ def gerar_dados_sensibilidade(parametro, parametros, valores):
         "aluguel": parametros["aluguel"],
         "anos": parametros["anos"],
         "taxa": parametros["taxa"],
+        "inflacao": parametros.get("inflacao", 0),
     }
 
     custos_compra = []
@@ -342,11 +374,13 @@ def gerar_dados_sensibilidade(parametro, parametros, valores):
             dados_ponto["seguro"],
             dados_ponto["revenda"],
             dados_ponto["anos"],
+            dados_ponto["inflacao"],
         )
         fluxo_aluguel = gerar_fluxo_aluguel(
             dados_ponto["quantidade"],
             dados_ponto["aluguel"],
             dados_ponto["anos"],
+            dados_ponto["inflacao"],
         )
         custos_compra.append(
             calcular_valor_presente(fluxo_compra, dados_ponto["taxa"])
@@ -365,6 +399,7 @@ def gerar_dados_sensibilidade(parametro, parametros, valores):
             dados["aluguel"],
             dados["taxa"],
             dados["anos"],
+            inflacao_anual=dados["inflacao"],
         )
         ponto_inflexao = transicao["ponto"] if transicao is not None else None
     else:
@@ -380,11 +415,14 @@ def gerar_dados_sensibilidade(parametro, parametros, valores):
                 dados_ponto["aluguel"],
                 dados_ponto["anos"],
                 dados_ponto["taxa"],
+                dados_ponto["inflacao"],
             )
 
         limite_superior = (
             max(10.0, dados[parametro] * 2)
             if parametro == "taxa"
+            else max(1.0, dados[parametro] * 2)
+            if parametro == "inflacao"
             else max(1_000_000.0, dados[parametro] * 10)
         )
         ponto = _buscar_inflexao_continua(
@@ -414,6 +452,7 @@ def gerar_dados_sensibilidade_aluguel(
     anos,
     taxa_anual,
     valores_aluguel,
+    inflacao_anual=0,
 ):
     """Mantém compatibilidade com a análise anterior de aluguel mensal."""
     resultado = gerar_dados_sensibilidade(
@@ -427,6 +466,7 @@ def gerar_dados_sensibilidade_aluguel(
             "aluguel": aluguel_mensal_por_veiculo,
             "anos": anos,
             "taxa": taxa_anual,
+            "inflacao": inflacao_anual,
         },
         valores_aluguel,
     )
