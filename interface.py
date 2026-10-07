@@ -1,6 +1,7 @@
 """Interface grafica para comparar compra e aluguel de uma frota."""
 
 import math
+import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -14,6 +15,11 @@ from calculos import (
     gerar_dados_sensibilidade,
     gerar_fluxo_aluguel,
     gerar_fluxo_compra,
+)
+from dados_externos import (
+    ErroDadosExternos,
+    buscar_ipca_12_meses,
+    buscar_selic,
 )
 
 
@@ -111,6 +117,66 @@ def criar_interface(root):
         padding=(4, 6),
     )
     resultado.grid(row=len(secoes) + 2, column=0, pady=2, sticky="w")
+
+    # Após o laço acima, é o quadro "Análise".
+    secao_analise = secao
+    botao_bcb = ttk.Button(secao_analise, text="Buscar Selic e IPCA (BCB)")
+    botao_bcb.grid(
+        row=len(secoes[-1][1]), column=0, columnspan=2, pady=(6, 0), sticky="ew"
+    )
+
+    def buscar_dados_bcb():
+        botao_bcb.configure(state="disabled", text="Buscando...")
+        retorno = {}
+
+        def trabalhar():
+            # Roda fora da thread da interface; só grava em `retorno`.
+            for nome, busca in (("selic", buscar_selic), ("ipca", buscar_ipca_12_meses)):
+                try:
+                    retorno[nome] = busca()
+                except ErroDadosExternos as erro:
+                    retorno[nome] = erro
+            retorno["fim"] = True
+
+        def aguardar():
+            if not retorno.get("fim"):
+                root.after(100, aguardar)
+                return
+            concluir(retorno)
+
+        threading.Thread(target=trabalhar, daemon=True).start()
+        root.after(100, aguardar)
+
+    def concluir(retorno):
+        botao_bcb.configure(state="normal", text="Buscar Selic e IPCA (BCB)")
+        falhas = []
+
+        selic = retorno["selic"]
+        if isinstance(selic, Exception):
+            falhas.append(f"Selic: {selic}")
+        else:
+            campos["taxa"].delete(0, tk.END)
+            campos["taxa"].insert(0, f"{selic[0]:.2f}".replace(".", ","))
+
+        ipca = retorno["ipca"]
+        if isinstance(ipca, Exception):
+            falhas.append(f"IPCA: {ipca}")
+        else:
+            considerar_inflacao.set(True)
+            campo_inflacao.configure(state="normal")
+            campo_inflacao.delete(0, tk.END)
+            campo_inflacao.insert(0, f"{ipca[0]:.2f}".replace(".", ","))
+
+        if falhas:
+            messagebox.showwarning(
+                "Dados do Banco Central",
+                "Não foi possível obter:\n\n"
+                + "\n".join(falhas)
+                + "\n\nInforme esses valores manualmente.",
+                parent=root,
+            )
+
+    botao_bcb.configure(command=buscar_dados_bcb)
 
     def ler_dados(inflacao_obrigatoria=False):
         try:
