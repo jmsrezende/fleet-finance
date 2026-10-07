@@ -9,7 +9,6 @@ from matplotlib.figure import Figure
 from matplotlib.ticker import FuncFormatter
 
 from calculos import (
-    analisar_pontos_inflexao,
     calcular_valor_presente,
     comparar_alternativas,
     gerar_dados_sensibilidade,
@@ -218,104 +217,6 @@ def criar_interface(root):
     ttk.Button(coluna_esquerda, text="Calcular", command=calcular).grid(
         row=len(secoes) + 1, column=0, pady=(2, 6), sticky="ew"
     )
-
-    secao_inflexao = ttk.LabelFrame(
-        coluna_esquerda, text="Análise de pontos de inflexão", padding=10
-    )
-    secao_inflexao.grid(
-        row=len(secoes) + 3, column=0, pady=(2, 4), sticky="ew"
-    )
-    texto_inflexao = tk.Text(
-        secao_inflexao, width=60, height=7, wrap="word", state="disabled"
-    )
-    texto_inflexao.grid(row=0, column=0, sticky="ew")
-    rolagem_inflexao = ttk.Scrollbar(
-        secao_inflexao, orient="vertical", command=texto_inflexao.yview
-    )
-    rolagem_inflexao.grid(row=0, column=1, sticky="ns")
-    texto_inflexao.configure(yscrollcommand=rolagem_inflexao.set)
-
-    def analisar():
-        dados = ler_dados()
-        if dados is None:
-            return
-
-        resultados = analisar_pontos_inflexao(
-            dados["quantidade"],
-            dados["preco"],
-            dados["manutencao"],
-            dados["seguro"],
-            dados["revenda"],
-            dados["aluguel"],
-            dados["anos"],
-            dados["taxa"],
-            dados["inflacao"],
-        )
-        rotulos = {
-            "preco": ("Preço de compra por veículo", "R$"),
-            "aluguel": ("Aluguel mensal por veículo", "R$"),
-            "manutencao": ("Manutenção anual por veículo", "R$"),
-            "seguro": ("Seguro anual por veículo", "R$"),
-            "revenda": ("Valor de revenda por veículo", "R$"),
-            "taxa": ("Taxa de desconto anual", "%"),
-            "anos": ("Número de anos", "anos"),
-        }
-
-        def formatar_valor_parametro(valor, unidade):
-            if unidade == "R$":
-                return f"R$ {formatar_reais(valor)}"
-            return f"{valor:g} {unidade}"
-
-        linhas = ["ANÁLISE DE PONTOS DE INFLEXÃO"]
-        for item in resultados:
-            chave = item["parametro"]
-            rotulo, unidade = rotulos[chave]
-            atual = item["atual"] * 100 if chave == "taxa" else item["atual"]
-            linhas.append(
-                f"\n{rotulo} — valor atual: "
-                f"{formatar_valor_parametro(atual, unidade)}"
-            )
-
-            ponto = item["ponto"]
-            if ponto is None:
-                inicio, fim = item["intervalo"]
-                if chave == "taxa":
-                    inicio, fim = inicio * 100, fim * 100
-                linhas.append(
-                    "  Não foi encontrada mudança de decisão no intervalo "
-                    f"{formatar_valor_parametro(inicio, unidade)} a "
-                    f"{formatar_valor_parametro(fim, unidade)}."
-                )
-            elif chave == "anos":
-                antes, depois = ponto["entre"]
-                if ponto["ponto"] is not None:
-                    linhas.append(
-                        f"  Igualdade em {ponto['ponto']} anos; antes favorece "
-                        f"{ponto['antes']} e depois favorece {ponto['depois']}."
-                    )
-                else:
-                    linhas.append(
-                        f"  Decisão muda entre {antes} e {depois} anos "
-                        "(não há igualdade exata em anos inteiros): "
-                        f"{ponto['antes']} → {ponto['depois']}."
-                    )
-            else:
-                valor_ponto = ponto["ponto"] * 100 if chave == "taxa" else ponto["ponto"]
-                linhas.append(
-                    "  Ponto de igualdade: "
-                    f"{formatar_valor_parametro(valor_ponto, unidade)}; "
-                    f"abaixo favorece {ponto['abaixo']} e acima favorece "
-                    f"{ponto['acima']}."
-                )
-
-        texto_inflexao.configure(state="normal")
-        texto_inflexao.delete("1.0", tk.END)
-        texto_inflexao.insert("1.0", "\n".join(linhas))
-        texto_inflexao.configure(state="disabled")
-
-    ttk.Button(
-        secao_inflexao, text="Analisar pontos de inflexão", command=analisar
-    ).grid(row=1, column=0, columnspan=2, pady=(8, 0), sticky="ew")
 
     secao_sensibilidade = ttk.LabelFrame(
         coluna_direita, text="Análise de sensibilidade", padding=10
