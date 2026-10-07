@@ -12,7 +12,7 @@ from calculos import (
     analisar_pontos_inflexao,
     calcular_valor_presente,
     comparar_alternativas,
-    gerar_dados_sensibilidade_aluguel,
+    gerar_dados_sensibilidade,
     gerar_fluxo_aluguel,
     gerar_fluxo_compra,
 )
@@ -276,50 +276,104 @@ def criar_interface(root):
     secao_sensibilidade.grid(
         row=0, column=0, pady=(0, 8), sticky="ew"
     )
-    ttk.Label(secao_sensibilidade, text="Parâmetro analisado: Aluguel mensal").grid(
-        row=0, column=0, padx=(0, 10), sticky="w"
+    definicoes_sensibilidade = {
+        "Preço de compra por veículo": {
+            "chave": "preco",
+            "titulo": "Sensibilidade do custo presente ao preço de compra",
+            "eixo_x": "Preço de compra por veículo (R$)",
+            "unidade": "R$",
+        },
+        "Aluguel mensal por veículo": {
+            "chave": "aluguel",
+            "titulo": "Sensibilidade do custo presente ao aluguel mensal",
+            "eixo_x": "Aluguel mensal por veículo (R$)",
+            "unidade": "R$",
+        },
+        "Manutenção anual por veículo": {
+            "chave": "manutencao",
+            "titulo": "Sensibilidade do custo presente à manutenção anual",
+            "eixo_x": "Manutenção anual por veículo (R$)",
+            "unidade": "R$",
+        },
+        "Seguro anual por veículo": {
+            "chave": "seguro",
+            "titulo": "Sensibilidade do custo presente ao seguro anual",
+            "eixo_x": "Seguro anual por veículo (R$)",
+            "unidade": "R$",
+        },
+        "Valor de revenda por veículo": {
+            "chave": "revenda",
+            "titulo": "Sensibilidade do custo presente ao valor de revenda",
+            "eixo_x": "Valor de revenda por veículo (R$)",
+            "unidade": "R$",
+        },
+        "Taxa de desconto anual": {
+            "chave": "taxa",
+            "titulo": "Sensibilidade do custo presente à taxa de desconto",
+            "eixo_x": "Taxa de desconto anual (%)",
+            "unidade": "%",
+        },
+        "Período de análise em anos": {
+            "chave": "anos",
+            "titulo": "Sensibilidade do custo presente ao período de análise",
+            "eixo_x": "Período de análise (anos)",
+            "unidade": "anos",
+        },
+    }
+    ttk.Label(secao_sensibilidade, text="Parâmetro:").grid(
+        row=0, column=0, padx=(0, 8), sticky="w"
     )
+    seletor_parametro = ttk.Combobox(
+        secao_sensibilidade,
+        state="readonly",
+        values=tuple(definicoes_sensibilidade),
+        width=32,
+    )
+    seletor_parametro.current(1)
+    seletor_parametro.grid(row=0, column=1, sticky="ew")
+    secao_sensibilidade.columnconfigure(1, weight=1)
 
     def gerar_grafico_sensibilidade():
         dados = ler_dados()
         if dados is None:
             return
 
-        limite_inferior = max(0, dados["aluguel"] * 0.5)
-        limite_superior = max(1, dados["aluguel"] * 1.5)
-
-        def calcular_sensibilidade(inferior, superior):
+        definicao = definicoes_sensibilidade[seletor_parametro.get()]
+        chave = definicao["chave"]
+        valor_atual = dados[chave]
+        if chave == "anos":
+            limite_inferior = max(1, math.floor(valor_atual * 0.5))
+            limite_superior = max(
+                limite_inferior + 1, math.ceil(valor_atual * 1.5)
+            )
+            valores = list(range(limite_inferior, limite_superior + 1))
+        else:
+            limite_inferior = max(0, valor_atual * 0.5)
+            if chave == "taxa":
+                limite_superior = valor_atual * 1.5 if valor_atual else 0.1
+            else:
+                limite_superior = valor_atual * 1.5 if valor_atual else 1
             valores = [
-                inferior + (superior - inferior) * indice / 40
+                limite_inferior
+                + (limite_superior - limite_inferior) * indice / 40
                 for indice in range(41)
             ]
-            return gerar_dados_sensibilidade_aluguel(
-                dados["quantidade"],
-                dados["preco"],
-                dados["manutencao"],
-                dados["seguro"],
-                dados["revenda"],
-                dados["aluguel"],
-                dados["anos"],
-                dados["taxa"],
-                valores,
-            )
 
-        sensibilidade = calcular_sensibilidade(limite_inferior, limite_superior)
+        sensibilidade = gerar_dados_sensibilidade(chave, dados, valores)
         ponto_inflexao = sensibilidade["ponto_inflexao"]
-        if ponto_inflexao is not None and not (
-            limite_inferior <= ponto_inflexao <= limite_superior
+        if (
+            ponto_inflexao is not None
+            and limite_inferior <= ponto_inflexao <= limite_superior
+            and ponto_inflexao not in valores
         ):
-            limite_inferior = min(limite_inferior, ponto_inflexao)
-            limite_superior = max(limite_superior, ponto_inflexao)
-            sensibilidade = calcular_sensibilidade(
-                limite_inferior, limite_superior
-            )
+            valores.append(ponto_inflexao)
+            valores.sort()
+            sensibilidade = gerar_dados_sensibilidade(chave, dados, valores)
 
         figura = estado_grafico["figura"]
         eixo = estado_grafico["eixo"]
         eixo.clear()
-        x = sensibilidade["valores_aluguel"]
+        x = sensibilidade["valores"]
         custos_compra = sensibilidade["custos_compra"]
         custos_aluguel = sensibilidade["custos_aluguel"]
 
@@ -350,29 +404,55 @@ def criar_interface(root):
 
         ponto_inflexao = sensibilidade["ponto_inflexao"]
         if ponto_inflexao is not None and x[0] <= ponto_inflexao <= x[-1]:
-            custo_no_ponto = custos_compra[0]
-            eixo.axvline(
-                ponto_inflexao,
-                color="black",
-                linestyle=":",
-                label=(
-                    "Ponto de inflexão: "
-                    f"R$ {formatar_reais(ponto_inflexao)}"
-                ),
+            indice_ponto = min(
+                range(len(x)), key=lambda indice: abs(x[indice] - ponto_inflexao)
             )
-            eixo.scatter([ponto_inflexao], [custo_no_ponto], color="black", zorder=4)
+            if math.isclose(x[indice_ponto], ponto_inflexao, rel_tol=1e-9, abs_tol=1e-9):
+                valor_formatado = {
+                    "R$": f"R$ {formatar_reais(ponto_inflexao)}",
+                    "%": f"{ponto_inflexao:.2%}",
+                    "anos": f"{ponto_inflexao} anos",
+                }[definicao["unidade"]]
+                custo_no_ponto = custos_compra[indice_ponto]
+                eixo.axvline(
+                    ponto_inflexao,
+                    color="black",
+                    linestyle=":",
+                    label=f"Ponto de inflexão: {valor_formatado}",
+                )
+                eixo.scatter(
+                    [ponto_inflexao], [custo_no_ponto], color="black", zorder=4
+                )
 
-        eixo.set_title("Sensibilidade do custo presente ao aluguel mensal")
-        eixo.set_xlabel("Aluguel mensal por veículo (R$)")
-        eixo.set_ylabel("Valor presente dos custos (R$)")
-        eixo.xaxis.set_major_formatter(
-            FuncFormatter(lambda valor, _: f"R$ {formatar_reais(valor)}")
-        )
+        eixo.set_title(definicao["titulo"], fontsize=10)
+        eixo.set_xlabel(definicao["eixo_x"], fontsize=8)
+        eixo.set_ylabel("Valor presente dos custos (R$)", fontsize=8)
+        eixo.tick_params(axis="both", labelsize=7)
+        eixo.tick_params(axis="x", labelrotation=12)
+        if definicao["unidade"] == "R$":
+            eixo.xaxis.set_major_formatter(
+                FuncFormatter(lambda valor, _: f"R$ {formatar_reais(valor)}")
+            )
+        elif definicao["unidade"] == "%":
+            eixo.xaxis.set_major_formatter(
+                FuncFormatter(lambda valor, _: f"{valor:.2%}")
+            )
+        else:
+            eixo.xaxis.set_major_formatter(
+                FuncFormatter(lambda valor, _: f"{valor:.0f}")
+            )
         eixo.yaxis.set_major_formatter(
             FuncFormatter(lambda valor, _: f"R$ {formatar_reais(valor)}")
         )
-        ticks_x = [x[0], x[-1]]
-        if ponto_inflexao is not None and x[0] <= ponto_inflexao <= x[-1]:
+        if chave == "anos" and len(x) <= 7:
+            ticks_x = list(x)
+        else:
+            ticks_x = [x[0], x[-1]]
+        if (
+            ponto_inflexao is not None
+            and x[0] <= ponto_inflexao <= x[-1]
+            and (chave != "anos" or ponto_inflexao in x)
+        ):
             ticks_x.append(ponto_inflexao)
         ticks_x.sort()
         ticks_sem_duplicatas = []
@@ -387,8 +467,9 @@ def criar_interface(root):
             loc="upper center",
             bbox_to_anchor=(0.5, -0.22),
             ncol=2,
+            fontsize=7,
         )
-        figura.tight_layout(rect=(0, 0.16, 1, 0.96))
+        figura.tight_layout(rect=(0, 0.18, 1, 0.94))
 
         canvas = estado_grafico["canvas"]
         if canvas is None:
@@ -402,7 +483,7 @@ def criar_interface(root):
         secao_sensibilidade,
         text="Gerar gráfico",
         command=gerar_grafico_sensibilidade,
-    ).grid(row=1, column=0, pady=(8, 0), sticky="w")
+    ).grid(row=1, column=0, columnspan=2, pady=(8, 0), sticky="w")
 
     area_grafico = ttk.Frame(coluna_direita, relief="sunken", borderwidth=1)
     area_grafico.grid(row=1, column=0, sticky="nsew")

@@ -288,6 +288,122 @@ def analisar_pontos_inflexao(
     return resultados
 
 
+def gerar_dados_sensibilidade(parametro, parametros, valores):
+    """Calcula os custos presentes ao variar um parâmetro por vez."""
+    parametros_analisaveis = {
+        "preco",
+        "aluguel",
+        "manutencao",
+        "seguro",
+        "revenda",
+        "taxa",
+        "anos",
+    }
+    if parametro not in parametros_analisaveis:
+        raise ValueError(f"Parâmetro de sensibilidade desconhecido: {parametro}.")
+
+    valores = list(valores)
+    if not valores:
+        raise ValueError("Informe pelo menos um valor para analisar.")
+    if parametro == "anos":
+        if any(
+            not isinstance(valor, int) or isinstance(valor, bool) or valor < 1
+            for valor in valores
+        ):
+            raise ValueError("Os anos devem ser números inteiros positivos.")
+    elif any(
+        not isinstance(valor, (int, float))
+        or not math.isfinite(valor)
+        or valor < 0
+        for valor in valores
+    ):
+        raise ValueError("Os valores analisados devem ser finitos e não negativos.")
+
+    dados = {
+        "quantidade": parametros["quantidade"],
+        "preco": parametros["preco"],
+        "manutencao": parametros["manutencao"],
+        "seguro": parametros["seguro"],
+        "revenda": parametros["revenda"],
+        "aluguel": parametros["aluguel"],
+        "anos": parametros["anos"],
+        "taxa": parametros["taxa"],
+    }
+
+    custos_compra = []
+    custos_aluguel = []
+    for valor in valores:
+        dados_ponto = dados.copy()
+        dados_ponto[parametro] = valor
+        fluxo_compra = gerar_fluxo_compra(
+            dados_ponto["quantidade"],
+            dados_ponto["preco"],
+            dados_ponto["manutencao"],
+            dados_ponto["seguro"],
+            dados_ponto["revenda"],
+            dados_ponto["anos"],
+        )
+        fluxo_aluguel = gerar_fluxo_aluguel(
+            dados_ponto["quantidade"],
+            dados_ponto["aluguel"],
+            dados_ponto["anos"],
+        )
+        custos_compra.append(
+            calcular_valor_presente(fluxo_compra, dados_ponto["taxa"])
+        )
+        custos_aluguel.append(
+            calcular_valor_presente(fluxo_aluguel, dados_ponto["taxa"])
+        )
+
+    if parametro == "anos":
+        transicao = _buscar_inflexao_anos(
+            dados["quantidade"],
+            dados["preco"],
+            dados["manutencao"],
+            dados["seguro"],
+            dados["revenda"],
+            dados["aluguel"],
+            dados["taxa"],
+            dados["anos"],
+        )
+        ponto_inflexao = transicao["ponto"] if transicao is not None else None
+    else:
+        def diferenca_com_valor(valor):
+            dados_ponto = dados.copy()
+            dados_ponto[parametro] = valor
+            return _diferenca_de_custos(
+                dados_ponto["quantidade"],
+                dados_ponto["preco"],
+                dados_ponto["manutencao"],
+                dados_ponto["seguro"],
+                dados_ponto["revenda"],
+                dados_ponto["aluguel"],
+                dados_ponto["anos"],
+                dados_ponto["taxa"],
+            )
+
+        limite_superior = (
+            max(10.0, dados[parametro] * 2)
+            if parametro == "taxa"
+            else max(1_000_000.0, dados[parametro] * 10)
+        )
+        ponto = _buscar_inflexao_continua(
+            parametro,
+            dados[parametro],
+            diferenca_com_valor,
+            limite_superior,
+        )
+        ponto_inflexao = ponto["ponto"] if ponto is not None else None
+
+    return {
+        "parametro": parametro,
+        "valores": valores,
+        "custos_compra": custos_compra,
+        "custos_aluguel": custos_aluguel,
+        "ponto_inflexao": ponto_inflexao,
+    }
+
+
 def gerar_dados_sensibilidade_aluguel(
     quantidade_veiculos,
     preco_por_veiculo,
@@ -299,57 +415,24 @@ def gerar_dados_sensibilidade_aluguel(
     taxa_anual,
     valores_aluguel,
 ):
-    """Calcula os custos presentes para cada aluguel mensal fornecido."""
-    valores = list(valores_aluguel)
-    if not valores:
-        raise ValueError("Informe pelo menos um valor de aluguel para analisar.")
-    if any(
-        not isinstance(valor, (int, float))
-        or not math.isfinite(valor)
-        or valor < 0
-        for valor in valores
-    ):
-        raise ValueError("Os valores de aluguel devem ser números finitos não negativos.")
-
-    custos_compra = []
-    custos_aluguel = []
-    for valor_aluguel in valores:
-        fluxo_compra = gerar_fluxo_compra(
-            quantidade_veiculos,
-            preco_por_veiculo,
-            manutencao_anual_por_veiculo,
-            seguro_anual_por_veiculo,
-            revenda_por_veiculo,
-            anos,
-        )
-        fluxo_aluguel = gerar_fluxo_aluguel(
-            quantidade_veiculos, valor_aluguel, anos
-        )
-        custos_compra.append(calcular_valor_presente(fluxo_compra, taxa_anual))
-        custos_aluguel.append(calcular_valor_presente(fluxo_aluguel, taxa_anual))
-
-    def diferenca_com_aluguel(valor):
-        return _diferenca_de_custos(
-            quantidade_veiculos,
-            preco_por_veiculo,
-            manutencao_anual_por_veiculo,
-            seguro_anual_por_veiculo,
-            revenda_por_veiculo,
-            valor,
-            anos,
-            taxa_anual,
-        )
-
-    limite_superior = max(1_000_000.0, aluguel_mensal_por_veiculo * 10)
-    ponto = _buscar_inflexao_continua(
+    """Mantém compatibilidade com a análise anterior de aluguel mensal."""
+    resultado = gerar_dados_sensibilidade(
         "aluguel",
-        aluguel_mensal_por_veiculo,
-        diferenca_com_aluguel,
-        limite_superior,
+        {
+            "quantidade": quantidade_veiculos,
+            "preco": preco_por_veiculo,
+            "manutencao": manutencao_anual_por_veiculo,
+            "seguro": seguro_anual_por_veiculo,
+            "revenda": revenda_por_veiculo,
+            "aluguel": aluguel_mensal_por_veiculo,
+            "anos": anos,
+            "taxa": taxa_anual,
+        },
+        valores_aluguel,
     )
     return {
-        "valores_aluguel": valores,
-        "custos_compra": custos_compra,
-        "custos_aluguel": custos_aluguel,
-        "ponto_inflexao": ponto["ponto"] if ponto is not None else None,
+        "valores_aluguel": resultado["valores"],
+        "custos_compra": resultado["custos_compra"],
+        "custos_aluguel": resultado["custos_aluguel"],
+        "ponto_inflexao": resultado["ponto_inflexao"],
     }

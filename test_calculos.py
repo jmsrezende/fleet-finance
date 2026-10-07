@@ -7,6 +7,7 @@ from calculos import (
     comparar_alternativas,
     gerar_fluxo_aluguel,
     gerar_fluxo_compra,
+    gerar_dados_sensibilidade,
     gerar_dados_sensibilidade_aluguel,
 )
 
@@ -221,6 +222,87 @@ class TestCalculosFinanceiros(unittest.TestCase):
                 for aluguel in (0, 1)
             ],
         )
+
+    def test_sensibilidade_recalcula_custos_para_todos_os_parametros(self):
+        parametros = {
+            "quantidade": 10,
+            "preco": 80000,
+            "manutencao": 5000,
+            "seguro": 3000,
+            "revenda": 30000,
+            "aluguel": 2000,
+            "anos": 5,
+            "taxa": 0.10,
+        }
+        casos = {
+            "preco": [40000, 80000, 120000],
+            "aluguel": [1000, 2000, 3000],
+            "manutencao": [2500, 5000, 7500],
+            "seguro": [1500, 3000, 4500],
+            "revenda": [15000, 30000, 45000],
+            "taxa": [0.05, 0.10, 0.15],
+            "anos": [4, 5, 6],
+        }
+
+        for parametro, valores in casos.items():
+            with self.subTest(parametro=parametro):
+                resultado = gerar_dados_sensibilidade(
+                    parametro, parametros, valores
+                )
+                self.assertEqual(resultado["parametro"], parametro)
+                self.assertEqual(resultado["valores"], valores)
+                self.assertEqual(len(resultado["custos_compra"]), len(valores))
+                self.assertEqual(len(resultado["custos_aluguel"]), len(valores))
+                for indice, valor in enumerate(valores):
+                    dados = parametros.copy()
+                    dados[parametro] = valor
+                    custo_compra = calcular_valor_presente(
+                        gerar_fluxo_compra(
+                            dados["quantidade"],
+                            dados["preco"],
+                            dados["manutencao"],
+                            dados["seguro"],
+                            dados["revenda"],
+                            dados["anos"],
+                        ),
+                        dados["taxa"],
+                    )
+                    custo_aluguel = calcular_valor_presente(
+                        gerar_fluxo_aluguel(
+                            dados["quantidade"],
+                            dados["aluguel"],
+                            dados["anos"],
+                        ),
+                        dados["taxa"],
+                    )
+                    self.assertAlmostEqual(
+                        resultado["custos_compra"][indice], custo_compra
+                    )
+                    self.assertAlmostEqual(
+                        resultado["custos_aluguel"][indice], custo_aluguel
+                    )
+
+    def test_sensibilidade_generica_valida_parametro_e_anos_inteiros(self):
+        parametros = {
+            "quantidade": 10,
+            "preco": 80000,
+            "manutencao": 5000,
+            "seguro": 3000,
+            "revenda": 30000,
+            "aluguel": 2000,
+            "anos": 5,
+            "taxa": 0.10,
+        }
+        for parametro, valores in (
+            ("nao_existe", [1]),
+            ("preco", [-1]),
+            ("taxa", [float("nan")]),
+            ("anos", [2.5]),
+            ("anos", [0]),
+        ):
+            with self.subTest(parametro=parametro, valores=valores):
+                with self.assertRaises(ValueError):
+                    gerar_dados_sensibilidade(parametro, parametros, valores)
 
 
 if __name__ == "__main__":
