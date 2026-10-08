@@ -1,7 +1,7 @@
 # Fleet Finance: comprar ou alugar a frota?
 
 Trabalho de Administração Financeira UFMG, 2026/2.
-Dupla: Estêvão Felipe da Fonseca e João Marcos.
+Dupla: Estêvão Felipe da Fonseca e João Marcos de Sousa Rezende.
 
 ## Tema: valor do dinheiro no tempo
 
@@ -42,6 +42,8 @@ python -m unittest -v
 2. **Comparação:** VP de cada alternativa, diferença e decisão.
 3. **Análise de sensibilidade:** gráficos do custo ao variar um parâmetro,
    com o ponto de inflexão em que a decisão muda.
+4. **Relatório PDF:** exporta entradas, fontes externas, metodologia, resultados,
+   pontos de inflexão, gráfico de sensibilidade e limitações da análise.
 
 
 ## Estrutura
@@ -52,6 +54,7 @@ python -m unittest -v
 | `interface.py` | Interface gráfica (Tkinter + Matplotlib) |
 | `calculos.py` | Fluxos de caixa, valor presente e sensibilidade |
 | `dados_externos.py` | Consulta à API SGS do Banco Central |
+| `relatorio.py` | Geração do relatório PDF da análise |
 | `test_*.py` | Testes automatizados |
 
 ## Limitações

@@ -21,6 +21,7 @@ from dados_externos import (
     buscar_ipca_12_meses,
     buscar_selic,
 )
+from relatorio import gerar_relatorio_pdf
 
 
 def formatar_reais(valor):
@@ -48,6 +49,11 @@ def criar_interface(root):
     coluna_direita.rowconfigure(1, weight=1)
 
     campos = {}
+    origem_dados = {
+        "selic": {"fonte": "manual"},
+        "ipca": {"fonte": "manual"},
+    }
+    variaveis_origem = {}
     secoes = (
         (
             "Compra",
@@ -83,7 +89,12 @@ def criar_interface(root):
             ttk.Label(secao, text=f"{rotulo} ({unidade}):").grid(
                 row=linha, column=0, padx=(0, 10), pady=3, sticky="w"
             )
-            campo = ttk.Entry(secao, width=18)
+            opcoes_campo = {}
+            if chave == "taxa":
+                variavel_taxa = tk.StringVar(master=root)
+                opcoes_campo["textvariable"] = variavel_taxa
+                variaveis_origem["selic"] = variavel_taxa
+            campo = ttk.Entry(secao, width=18, **opcoes_campo)
             campo.grid(row=linha, column=1, pady=3, sticky="e")
             campos[chave] = campo
 
@@ -105,10 +116,23 @@ def criar_interface(root):
     ttk.Label(secao_inflacao, text="Taxa de inflação anual (%):").grid(
         row=1, column=0, padx=(0, 10), pady=(4, 0), sticky="w"
     )
-    campo_inflacao = ttk.Entry(secao_inflacao, width=18)
+    variavel_inflacao = tk.StringVar(master=root)
+    variaveis_origem["ipca"] = variavel_inflacao
+    campo_inflacao = ttk.Entry(
+        secao_inflacao, width=18, textvariable=variavel_inflacao
+    )
     campo_inflacao.insert(0, "6,00")
     campo_inflacao.configure(state="disabled")
     campo_inflacao.grid(row=1, column=1, pady=(4, 0), sticky="e")
+
+    def marcar_origem_manual(indicador):
+        def atualizar_origem(*_):
+            origem_dados[indicador] = {"fonte": "manual"}
+
+        return atualizar_origem
+
+    for indicador, variavel in variaveis_origem.items():
+        variavel.trace_add("write", marcar_origem_manual(indicador))
 
     resultado = ttk.Label(
         coluna_esquerda,
@@ -154,18 +178,24 @@ def criar_interface(root):
         selic = retorno["selic"]
         if isinstance(selic, Exception):
             falhas.append(f"Selic: {selic}")
+            if origem_dados["selic"]["fonte"] != "bcb":
+                origem_dados["selic"] = {"fonte": "manual", "fallback": True}
         else:
             campos["taxa"].delete(0, tk.END)
             campos["taxa"].insert(0, f"{selic[0]:.2f}".replace(".", ","))
+            origem_dados["selic"] = {"fonte": "bcb", "data": selic[1]}
 
         ipca = retorno["ipca"]
         if isinstance(ipca, Exception):
             falhas.append(f"IPCA: {ipca}")
+            if origem_dados["ipca"]["fonte"] != "bcb":
+                origem_dados["ipca"] = {"fonte": "manual", "fallback": True}
         else:
             considerar_inflacao.set(True)
             campo_inflacao.configure(state="normal")
             campo_inflacao.delete(0, tk.END)
             campo_inflacao.insert(0, f"{ipca[0]:.2f}".replace(".", ","))
+            origem_dados["ipca"] = {"fonte": "bcb", "data": ipca[1]}
 
         if falhas:
             messagebox.showwarning(
@@ -352,6 +382,37 @@ def criar_interface(root):
     seletor_parametro.current(1)
     seletor_parametro.grid(row=0, column=1, sticky="ew")
     secao_sensibilidade.columnconfigure(1, weight=1)
+
+    def gerar_relatorio():
+        parametro = definicoes_sensibilidade[seletor_parametro.get()]["chave"]
+        dados = ler_dados(inflacao_obrigatoria=parametro == "inflacao")
+        if dados is None:
+            return
+
+        try:
+            caminho = gerar_relatorio_pdf(
+                dados,
+                considerando_inflacao=considerar_inflacao.get(),
+                origem_dados=origem_dados,
+                parametro_sensibilidade=parametro,
+            )
+        except (OSError, ValueError) as erro:
+            messagebox.showerror(
+                "Erro ao gerar relatório", str(erro), parent=root
+            )
+            return
+
+        messagebox.showinfo(
+            "Relatório gerado",
+            f"O relatório PDF foi salvo em:\n{caminho}",
+            parent=root,
+        )
+
+    ttk.Button(
+        coluna_esquerda,
+        text="Gerar relatório PDF",
+        command=gerar_relatorio,
+    ).grid(row=len(secoes) + 3, column=0, pady=(2, 6), sticky="ew")
 
     def gerar_grafico_sensibilidade():
         definicao = definicoes_sensibilidade[seletor_parametro.get()]
