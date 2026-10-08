@@ -60,5 +60,5 @@ python -m unittest -v
 ## Limitações
 
 - O IPCA dos últimos 12 meses é inflação passada, usado como estimativa da futura.
-- Os fluxos são anuais e pagos no fim de cada ano.
+- A aquisição ocorre no período zero; os fluxos anuais posteriores são pagos ao fim de cada ano.
 - Uma única taxa de desconto vale para todo o período.

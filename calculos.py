@@ -1,9 +1,14 @@
-"""Calculos de valor presente para comparar custos de compra e aluguel."""
+"""Fluxos de caixa e comparação a valor presente para compra ou aluguel.
+
+Os custos unitários informados são projetados pelo período de análise, agrupados
+para a frota e descontados pela taxa anual fornecida pelo usuário.
+"""
 
 import math
 
 
 def _validar_inflacao(inflacao_anual):
+    """Garante que a taxa anual usada para reajustar custos futuros seja válida."""
     if (
         not isinstance(inflacao_anual, (int, float))
         or not math.isfinite(inflacao_anual)
@@ -21,16 +26,24 @@ def gerar_fluxo_compra(
     anos,
     inflacao_anual=0,
 ):
-    """Retorna os custos de compra nos periodos 0 a anos."""
+    """Monta o fluxo de custos da compra nos períodos 0 a ``anos``.
+
+    O período 0 concentra o desembolso inicial de aquisição da frota. Em cada
+    ano seguinte, manutenção e seguro começam com os valores informados; quando
+    há inflação, esses custos são reajustados a partir do segundo ano. A revenda
+    reduz o desembolso líquido apenas no último período.
+    """
     _validar_inflacao(inflacao_anual)
     fluxo = [quantidade_veiculos * preco_por_veiculo]
 
     for ano in range(1, anos + 1):
+        # O expoente inicia em zero: o custo do primeiro ano é o informado e
+        # os anos seguintes incorporam a inflação acumulada até aquele período.
         custo_anual = quantidade_veiculos * (
             manutencao_anual_por_veiculo + seguro_anual_por_veiculo
         ) * (1 + inflacao_anual) ** (ano - 1)
         if ano == anos:
-            # A revenda reduz o desembolso liquido no ultimo periodo.
+            # O valor de revenda reduz o custo líquido no encerramento do horizonte.
             custo_anual -= quantidade_veiculos * revenda_por_veiculo
         fluxo.append(custo_anual)
 
@@ -43,22 +56,39 @@ def gerar_fluxo_aluguel(
     anos,
     inflacao_anual=0,
 ):
-    """Anualiza o aluguel mensal e registra cada pagamento no fim do ano."""
+    """Anualiza os aluguéis e registra os pagamentos nos períodos anuais.
+
+    O período 0 não tem pagamento. O valor anual do primeiro ano corresponde
+    à mensalidade informada multiplicada por 12; nos anos seguintes, a inflação
+    reajusta o aluguel. Cada pagamento futuro será posteriormente descontado
+    pela taxa anual na apuração do valor presente.
+    """
     _validar_inflacao(inflacao_anual)
     pagamento_anual = quantidade_veiculos * aluguel_mensal_por_veiculo * 12
     return [0] + [
+        # Ano 1 usa a mensalidade-base; anos posteriores acumulam os reajustes.
         pagamento_anual * (1 + inflacao_anual) ** (ano - 1)
         for ano in range(1, anos + 1)
     ]
 
 
 def calcular_valor_presente(fluxo, taxa_anual):
-    """Desconta cada custo pelo numero do periodo anual em que ocorre."""
+    """Traz os custos de cada período à data inicial pela taxa anual.
+
+    Para cada fluxo ``Fluxo_t``, aplica VP_t = Fluxo_t / (1 + i)^t, em que
+    ``i`` é a taxa de desconto anual e ``t`` é o período. O desembolso no
+    período zero não sofre desconto; os fluxos futuros são somados em valor
+    presente. A taxa de inflação, se usada, já foi aplicada ao fluxo projetado.
+    """
     return sum(valor / (1 + taxa_anual) ** periodo for periodo, valor in enumerate(fluxo))
 
 
 def comparar_alternativas(custo_compra, custo_aluguel):
-    """Compara os valores presentes dos custos e retorna decisao e diferenca."""
+    """Seleciona o menor custo presente e informa a diferença absoluta.
+
+    A diferença é calculada entre os valores presentes totais da compra e do
+    aluguel; custo igual resulta em empate e diferença nula.
+    """
     if custo_compra < custo_aluguel:
         return "compra", custo_aluguel - custo_compra
     if custo_aluguel < custo_compra:
@@ -77,6 +107,11 @@ def _diferenca_de_custos(
     taxa_anual,
     inflacao_anual=0,
 ):
+    """Retorna VP(compra) - VP(aluguel) para um conjunto de premissas.
+
+    O sinal permite identificar qual alternativa custa menos: valor negativo
+    favorece a compra; valor positivo favorece o aluguel.
+    """
     fluxo_compra = gerar_fluxo_compra(
         quantidade_veiculos,
         preco_por_veiculo,
@@ -98,6 +133,7 @@ def _diferenca_de_custos(
 
 
 def _encontrar_raiz_bissecao(funcao, esquerda, direita):
+    """Refina o parâmetro em que a diferença entre os custos presentes zera."""
     valor_esquerda = funcao(esquerda)
     valor_direita = funcao(direita)
     if valor_esquerda * valor_direita >= 0:
@@ -124,6 +160,12 @@ def _buscar_inflexao_continua(
     limite_superior,
     amostras=10000,
 ):
+    """Procura uma mudança de alternativa ao variar um parâmetro contínuo.
+
+    Os demais dados financeiros permanecem fixos. A raiz procurada corresponde
+    à condição VP(compra) - VP(aluguel) = 0; para a taxa de desconto e a
+    inflação, a busca percorre uma grade porque podem ocorrer várias transições.
+    """
     if parametro in ("taxa", "inflacao"):
         valores = [
             limite_superior * indice / amostras
@@ -182,6 +224,12 @@ def _buscar_inflexao_anos(
     limite_anos=100,
     inflacao_anual=0,
 ):
+    """Identifica mudanças discretas de decisão ao variar o horizonte em anos.
+
+    Como anos só assume valores inteiros, o equilíbrio pode ocorrer em um ano
+    específico ou a alternativa de menor custo pode mudar entre dois anos
+    consecutivos.
+    """
     decisoes = {}
     for anos in range(1, limite_anos + 1):
         diferenca = _diferenca_de_custos(
@@ -245,7 +293,14 @@ def analisar_pontos_inflexao(
     taxa_anual,
     inflacao_anual=0,
 ):
-    """Busca mudanças de decisão para cada parâmetro, mantendo os demais fixos."""
+    """Calcula condições de equilíbrio para parâmetros do cenário informado.
+
+    Um ponto de inflexão é o valor do parâmetro em que os valores presentes
+    de compra e aluguel se igualam e a alternativa financeiramente preferida
+    pode mudar. Cada busca altera um parâmetro por vez, mantendo quantidade,
+    período, inflação e todas as demais premissas constantes. Para o horizonte,
+    a análise procura a transição entre períodos inteiros.
+    """
     parametros = (
         ("preco", preco_por_veiculo),
         ("aluguel", aluguel_mensal_por_veiculo),
@@ -319,7 +374,14 @@ def analisar_pontos_inflexao(
 
 
 def gerar_dados_sensibilidade(parametro, parametros, valores):
-    """Calcula os custos presentes ao variar um parâmetro por vez."""
+    """Calcula ambos os custos presentes em vários valores de um parâmetro.
+
+    Cada cenário varia somente ``parametro``; os demais valores, inclusive a
+    taxa de desconto e a inflação vigente, são preservados. A comparação entre
+    as séries de compra e aluguel mostra como a diferença entre alternativas
+    responde à variação, e o ponto de inflexão indica eventual igualdade dos
+    custos presentes.
+    """
     parametros_analisaveis = {
         "preco",
         "aluguel",

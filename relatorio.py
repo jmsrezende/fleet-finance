@@ -1,4 +1,8 @@
-"""Geração de relatórios PDF para a análise financeira da frota."""
+"""Geração do relatório PDF com os dados da execução atual da aplicação.
+
+O módulo reúne premissas, fontes dos indicadores, resultados financeiros,
+pontos de inflexão e uma figura de sensibilidade para documentar o cenário.
+"""
 
 from datetime import datetime
 import math
@@ -106,6 +110,7 @@ def _formatar_percentual(taxa):
 
 
 def _validar_dados(dados, considerando_inflacao):
+    """Impede a emissão de relatório sem premissas numéricas utilizáveis."""
     if not isinstance(dados, dict):
         raise ValueError("Os dados da análise devem ser informados em um dicionário.")
 
@@ -142,6 +147,11 @@ def _validar_dados(dados, considerando_inflacao):
 
 
 def _calcular_sensibilidade(dados, parametro, taxa_inflacao_informada):
+    """Obtém os custos de compra e aluguel ao variar o parâmetro selecionado.
+
+    A amostra é centrada no valor atualmente informado; os demais parâmetros
+    são preservados pelo gerador de sensibilidade compartilhado com o modelo.
+    """
     definicao = _DEFINICOES_SENSIBILIDADE.get(parametro)
     if definicao is None:
         raise ValueError("Selecione um parâmetro válido para a sensibilidade.")
@@ -181,6 +191,7 @@ def _calcular_sensibilidade(dados, parametro, taxa_inflacao_informada):
 
 
 def _criar_grafico_sensibilidade(dados, parametro, taxa_inflacao_informada):
+    """Desenha as séries de custos presentes e devolve a imagem para o PDF."""
     resultado, definicao = _calcular_sensibilidade(
         dados, parametro, taxa_inflacao_informada
     )
@@ -256,6 +267,7 @@ def _criar_grafico_sensibilidade(dados, parametro, taxa_inflacao_informada):
 
 
 def _texto_origem(origem):
+    """Descreve se o indicador veio do BCB, da entrada manual ou do fallback."""
     if origem and origem.get("fonte") == "bcb":
         data = origem.get("data")
         referencia = f" (referência: {data})" if data else ""
@@ -269,6 +281,7 @@ def _texto_origem(origem):
 
 
 def _descricao_pontos_inflexao(resultados):
+    """Converte somente pontos retornados pelo modelo em explicações textuais."""
     nomes = {
         "preco": "preço de compra por veículo",
         "aluguel": "aluguel mensal por veículo",
@@ -316,6 +329,7 @@ def _descricao_pontos_inflexao(resultados):
 
 
 def _criar_estilos():
+    """Define a hierarquia tipográfica e visual das seções do documento."""
     estilos = getSampleStyleSheet()
     estilos.add(
         ParagraphStyle(
@@ -384,6 +398,7 @@ def _criar_estilos():
 
 
 def _adicionar_rodape(canvas, doc):
+    """Identifica o relatório e numera cada página durante a composição."""
     canvas.saveState()
     canvas.setFont("Helvetica", 8)
     canvas.setFillColor(colors.HexColor("#666666"))
@@ -395,6 +410,7 @@ def _adicionar_rodape(canvas, doc):
 
 
 def _caminho_padrao():
+    """Cria o destino relatorios/ e evita sobrescrever PDFs existentes."""
     pasta = Path(__file__).resolve().parent / "relatorios"
     pasta.mkdir(parents=True, exist_ok=True)
     base = datetime.now().strftime("relatorio_frota_%Y%m%d_%H%M%S")
@@ -413,10 +429,19 @@ def gerar_relatorio_pdf(
     parametro_sensibilidade="aluguel",
     caminho_saida=None,
 ):
-    """Gera o PDF com os resultados calculados a partir dos dados recebidos."""
+    """Gera um PDF completo para as premissas atuais fornecidas pela interface.
+
+    Recalcula os custos com as funções financeiras existentes, solicita os
+    pontos de inflexão ao analisador do modelo e monta o gráfico com a mesma
+    rotina de sensibilidade usada pela aplicação. O documento inclui entradas,
+    origem dos dados, metodologia, comparação e conclusão, inflexões, gráfico,
+    limitações e data/hora de geração.
+    """
     _validar_dados(dados, considerando_inflacao)
     origem_dados = origem_dados or {}
 
+    # A cópia mantém intactos os campos originais da GUI; inflação desabilitada
+    # significa fluxo sem reajuste, mesmo que exista um valor salvo no campo.
     dados_analise = dict(dados)
     if not considerando_inflacao:
         dados_analise["inflacao"] = 0
@@ -440,6 +465,8 @@ def gerar_relatorio_pdf(
     custo_aluguel = calcular_valor_presente(fluxo_aluguel, dados_analise["taxa"])
     alternativa, diferenca = comparar_alternativas(custo_compra, custo_aluguel)
 
+    # Cada ponto é calculado pelo analisador existente, que varia um parâmetro
+    # mantendo as demais premissas do cenário atual constantes.
     pontos_inflexao = analisar_pontos_inflexao(
         dados_analise["quantidade"],
         dados_analise["preco"],
@@ -454,6 +481,8 @@ def gerar_relatorio_pdf(
     taxa_inflacao_informada = (
         dados["inflacao"] if parametro_sensibilidade == "inflacao" else 0
     )
+    # O gráfico é construído a partir dos custos retornados pela rotina de
+    # sensibilidade; nenhuma curva financeira é calculada separadamente aqui.
     grafico, rotulo_sensibilidade, resultado_sensibilidade = (
         _criar_grafico_sensibilidade(
             dados_analise,
@@ -467,6 +496,8 @@ def gerar_relatorio_pdf(
     caminho.parent.mkdir(parents=True, exist_ok=True)
 
     estilos = _criar_estilos()
+    # Os elementos a seguir compõem o documento na ordem de leitura acadêmica:
+    # premissas e fontes, metodologia, decisão, análise complementar e limitações.
     elementos = [
         Paragraph(TITULO, estilos["TituloRelatorio"]),
         Paragraph(
@@ -660,6 +691,7 @@ def gerar_relatorio_pdf(
         author="Fleet Finance",
         pageCompression=0,
     )
+    # O ReportLab pagina o conteúdo e chama o rodapé em cada página produzida.
     documento.build(
         elementos,
         onFirstPage=_adicionar_rodape,
@@ -670,6 +702,7 @@ def gerar_relatorio_pdf(
 
 
 def _criar_tabela(dados):
+    """Formata tabelas de premissas e resultados com cabeçalho consistente."""
     tabela = Table(dados, colWidths=(8.7 * cm, 8.5 * cm), repeatRows=1, hAlign="LEFT")
     tabela.setStyle(
         TableStyle(

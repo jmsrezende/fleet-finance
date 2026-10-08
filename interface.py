@@ -1,4 +1,8 @@
-"""Interface grafica para comparar compra e aluguel de uma frota."""
+"""Interface gráfica e fluxo de dados da análise financeira da frota.
+
+Os campos da tela são validados e convertidos em premissas para os cálculos;
+os mesmos valores são usados tanto na comparação quanto no relatório.
+"""
 
 import math
 import threading
@@ -30,6 +34,7 @@ def formatar_reais(valor):
 
 
 def criar_interface(root):
+    """Cria os campos de entrada, resultados e ferramentas da análise."""
     root.title("Comparação de custos da frota")
     root.geometry("1180x800")
     root.minsize(900, 620)
@@ -48,6 +53,8 @@ def criar_interface(root):
     coluna_direita.columnconfigure(0, weight=1)
     coluna_direita.rowconfigure(1, weight=1)
 
+    # Os valores da tela alimentam a comparação; esta estrutura acompanha se
+    # Selic e IPCA vieram do BCB ou permanecem como entrada manual/fallback.
     campos = {}
     origem_dados = {
         "selic": {"fonte": "manual"},
@@ -126,6 +133,7 @@ def criar_interface(root):
     campo_inflacao.grid(row=1, column=1, pady=(4, 0), sticky="e")
 
     def marcar_origem_manual(indicador):
+        """Atualiza a proveniência se o usuário editar uma taxa externa."""
         def atualizar_origem(*_):
             origem_dados[indicador] = {"fonte": "manual"}
 
@@ -150,11 +158,13 @@ def criar_interface(root):
     )
 
     def buscar_dados_bcb():
+        """Consulta os indicadores em segundo plano para manter a GUI responsiva."""
         botao_bcb.configure(state="disabled", text="Buscando...")
         retorno = {}
 
         def trabalhar():
-            # Roda fora da thread da interface; só grava em `retorno`.
+            # As chamadas de rede rodam fora da thread visual; os erros são
+            # devolvidos à interface, que conserva as taxas inseridas à mão.
             for nome, busca in (("selic", buscar_selic), ("ipca", buscar_ipca_12_meses)):
                 try:
                     retorno[nome] = busca()
@@ -172,6 +182,7 @@ def criar_interface(root):
         root.after(100, aguardar)
 
     def concluir(retorno):
+        """Aplica respostas disponíveis e mantém entradas manuais em falhas."""
         botao_bcb.configure(state="normal", text="Buscar Selic e IPCA (BCB)")
         falhas = []
 
@@ -209,6 +220,12 @@ def criar_interface(root):
     botao_bcb.configure(command=buscar_dados_bcb)
 
     def ler_dados(inflacao_obrigatoria=False):
+        """Valida campos e converte percentuais da tela para taxas decimais.
+
+        Quando a inflação está desabilitada, zero é enviado ao modelo; a
+        sensibilidade da inflação pode solicitar a taxa digitada sem ativá-la
+        no cenário-base.
+        """
         try:
             taxa_inflacao = 0
             if considerar_inflacao.get() or inflacao_obrigatoria:
@@ -250,6 +267,7 @@ def criar_interface(root):
             return None
 
     def obter_numero(chave, rotulo, inteiro=False):
+        """Converte e valida um campo numérico antes de usá-lo no modelo."""
         texto = campos[chave].get().strip()
         if not texto:
             raise ValueError(f"Preencha o campo '{rotulo}'.")
@@ -271,10 +289,13 @@ def criar_interface(root):
         return valor
 
     def calcular():
+        """Calcula os fluxos de ambas as alternativas e atualiza o resultado."""
         dados = ler_dados()
         if dados is None:
             return
 
+        # Cada fluxo segue a modelagem financeira central; os dois totais são
+        # trazidos a valor presente pela mesma taxa anual de desconto.
         fluxo_compra = gerar_fluxo_compra(
             dados["quantidade"],
             dados["preco"],
@@ -294,6 +315,7 @@ def criar_interface(root):
         custo_aluguel = calcular_valor_presente(fluxo_aluguel, dados["taxa"])
         alternativa, diferenca = comparar_alternativas(custo_compra, custo_aluguel)
 
+        # Exibe a diferença absoluta e a alternativa com menor custo presente.
         nome_alternativa = {
             "compra": "COMPRAR",
             "aluguel": "ALUGAR",
@@ -320,6 +342,8 @@ def criar_interface(root):
     secao_sensibilidade.grid(
         row=0, column=0, pady=(0, 8), sticky="ew"
     )
+    # Os nomes apresentados na GUI apontam para as chaves aceitas pelo cálculo
+    # de sensibilidade; a escolha determina apenas qual premissa será variada.
     definicoes_sensibilidade = {
         "Preço de compra por veículo": {
             "chave": "preco",
@@ -384,6 +408,7 @@ def criar_interface(root):
     secao_sensibilidade.columnconfigure(1, weight=1)
 
     def gerar_relatorio():
+        """Envia premissas atuais e proveniência ao módulo responsável pelo PDF."""
         parametro = definicoes_sensibilidade[seletor_parametro.get()]["chave"]
         dados = ler_dados(inflacao_obrigatoria=parametro == "inflacao")
         if dados is None:
@@ -415,6 +440,7 @@ def criar_interface(root):
     ).grid(row=len(secoes) + 3, column=0, pady=(2, 6), sticky="ew")
 
     def gerar_grafico_sensibilidade():
+        """Atualiza o gráfico com os custos presentes para cada valor testado."""
         definicao = definicoes_sensibilidade[seletor_parametro.get()]
         chave = definicao["chave"]
         dados = ler_dados(inflacao_obrigatoria=chave == "inflacao")
@@ -442,6 +468,8 @@ def criar_interface(root):
                 for indice in range(41)
             ]
 
+        # O cálculo varia uma premissa por vez e preserva as demais, incluindo
+        # a inflação vigente. A série resultante alimenta as curvas do gráfico.
         sensibilidade = gerar_dados_sensibilidade(chave, dados, valores)
         ponto_inflexao = sensibilidade["ponto_inflexao"]
         if (
